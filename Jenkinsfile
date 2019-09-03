@@ -2,9 +2,9 @@
 
 node {
 
-    def SF_CONSUMER_KEY=env.SF_CONSUMER_KEY
-    def SF_USERNAME=env.SF_USERNAME
-    def SERVER_KEY_CREDENTIALS_ID=env.SERVER_KEY_CREDENTIALS_ID
+    def CONNECTED_APP_CONSUMER_KEY_DH=env.CONNECTED_APP_CONSUMER_KEY_DH
+    def HUB_ORG_DH=env.HUB_ORG_DH
+    def JWT_CRED_ID_DH=env.JWT_CRED_ID_DH
     def DEPLOYDIR='src'
     def TEST_LEVEL='RunLocalTests'
 
@@ -26,13 +26,13 @@ node {
     // JWT key credentials.
     // -------------------------------------------------------------------------
 
-    withCredentials([file(credentialsId: SERVER_KEY_CREDENTIALS_ID, variable: 'server_key_file')]) {
+    withCredentials([file(credentialsId: JWT_CRED_ID_DH, variable: 'server_key_file')]) {
         // -------------------------------------------------------------------------
         // Authenticate to Salesforce using the server key.
         // -------------------------------------------------------------------------
 
         stage('Authorize to Salesforce') {
-            rc = command "${toolbelt}/sfdx force:auth:jwt:grant --instanceurl https://test.salesforce.com --clientid ${SF_CONSUMER_KEY} --jwtkeyfile ${server_key_file} --username ${SF_USERNAME} --setalias UAT"
+            rc = command "${toolbelt}/sfdx force:auth:jwt:grant --instanceurl https://test.salesforce.com --clientid ${CONNECTED_APP_CONSUMER_KEY_DH} --jwtkeyfile ${server_key_file} --username ${HUB_ORG_DH} --setalias UAT"
             if (rc != 0) {
                 error 'Salesforce org authorization failed.'
             }
