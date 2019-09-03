@@ -29,8 +29,18 @@ node {
             //rmsg = bat returnStdout: true, script: "${toolbelt}/sfdx force:org:create --definitionfile config/project-scratch-def.json --json --setdefaultusername"
             rmsg = bat returnStdout: true, script: "\"${toolbelt}\" force:org:create --definitionfile config/project-scratch-def.json --json --setdefaultusername"
             printf rmsg
+            println('Hello from a Job DSL script!')
+            println(rmsg)
+            def beginIndex = rmsg.indexOf('{')
+            def endIndex = rmsg.indexOf('}')
+            println(beginIndex)
+            println(endIndex)
+            def jsobSubstring = rmsg.substring(beginIndex)
+            println(jsobSubstring)
+            
             def jsonSlurper = new JsonSlurperClassic()
-            def robj = jsonSlurper.parseText(rmsg)
+            def robj = jsonSlurper.parseText(jsobSubstring)
+            //if (robj.status != "ok") { error 'org creation failed: ' + robj.message }
             if (robj.status != 0) { error 'org creation failed: ' + robj.message }
             SFDC_USERNAME=robj.result.username
             robj = null
