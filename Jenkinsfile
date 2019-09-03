@@ -1,73 +1,64 @@
 #!groovy
-
+import groovy.json.JsonSlurperClassic
 node {
 
-    def CONNECTED_APP_CONSUMER_KEY_DH=env.CONNECTED_APP_CONSUMER_KEY_DH
-    def HUB_ORG_DH=env.HUB_ORG_DH
-    def JWT_CRED_ID_DH=env.JWT_CRED_ID_DH
-    def DEPLOYDIR='src'
-    def TEST_LEVEL='RunLocalTests'
+    def BUILD_NUMBER=env.BUILD_NUMBER
+    def RUN_ARTIFACT_DIR="tests/${BUILD_NUMBER}"
+    def SFDC_USERNAME
 
+    def HUB_ORG=env.HUB_ORG_DH
+    def SFDC_HOST = env.SFDC_HOST_DH
+    def JWT_KEY_CRED_ID = env.JWT_CRED_ID_DH
+    def CONNECTED_APP_CONSUMER_KEY=env.CONNECTED_APP_CONSUMER_KEY_DH
 
     def toolbelt = tool 'toolbelt'
 
-
-    // -------------------------------------------------------------------------
-    // Check out code from source control.
-    // -------------------------------------------------------------------------
-
     stage('checkout source') {
+        // when running in multi-branch job, one must issue this command
         checkout scm
     }
 
+    withCredentials([file(credentialsId: JWT_KEY_CRED_ID, variable: 'jwt_key_file')]) {
+        stage('Create Scratch Org') {
 
-    // -------------------------------------------------------------------------
-    // Run all the enclosed stages with access to the Salesforce
-    // JWT key credentials.
-    // -------------------------------------------------------------------------
+            rc = sh returnStatus: true, script: "${toolbelt}/sfdx force:auth:jwt:grant --clientid ${CONNECTED_APP_CONSUMER_KEY} --username ${HUB_ORG} --jwtkeyfile ${jwt_key_file} --setdefaultdevhubusername --instanceurl ${SFDC_HOST}"
+            if (rc != 0) { error 'hub org authorization failed' }
 
-    withCredentials([file(credentialsId: JWT_CRED_ID_DH, variable: 'server_key_file')]) {
-        // -------------------------------------------------------------------------
-        // Authenticate to Salesforce using the server key.
-        // -------------------------------------------------------------------------
+            // need to pull out assigned username
+            rmsg = sh returnStdout: true, script: "${toolbelt}/sfdx force:org:create --definitionfile config/project-scratch-def.json --json --setdefaultusername"
+            printf rmsg
+            def jsonSlurper = new JsonSlurperClassic()
+            def robj = jsonSlurper.parseText(rmsg)
+            if (robj.status != 0) { error 'org creation failed: ' + robj.message }
+            SFDC_USERNAME=robj.result.username
+            robj = null
 
-        stage('Authorize to Salesforce') {
-            rc = command "${toolbelt}/sfdx force:auth:jwt:grant --instanceurl https://test.salesforce.com --clientid ${CONNECTED_APP_CONSUMER_KEY_DH} --jwtkeyfile ${server_key_file} --username ${HUB_ORG_DH} --setalias UAT"
+        }
+
+        stage('Push To Test Org') {
+            rc = sh returnStatus: true, script: "${toolbelt}/sfdx force:source:push --targetusername ${SFDC_USERNAME}"
             if (rc != 0) {
-                error 'Salesforce org authorization failed.'
+                error 'push failed'
+            }
+            // assign permset
+            rc = sh returnStatus: true, script: "${toolbelt}/sfdx force:user:permset:assign --targetusername ${SFDC_USERNAME} --permsetname DreamHouse"
+            if (rc != 0) {
+                error 'permset:assign failed'
             }
         }
 
-
-        // -------------------------------------------------------------------------
-        // Deploy metadata and execute unit tests.
-        // -------------------------------------------------------------------------
-
-        stage('Deploy and Run Tests') {
-            rc = command "${toolbelt}/sfdx force:mdapi:deploy --wait 10 --deploydir ${DEPLOYDIR} --targetusername UAT --testlevel ${TEST_LEVEL}"
-            if (rc != 0) {
-                error 'Salesforce deploy and test run failed.'
+        stage('Run Apex Test') {
+            sh "mkdir -p ${RUN_ARTIFACT_DIR}"
+            timeout(time: 120, unit: 'SECONDS') {
+                rc = sh returnStatus: true, script: "${toolbelt}/sfdx force:apex:test:run --testlevel RunLocalTests --outputdir ${RUN_ARTIFACT_DIR} --resultformat tap --targetusername ${SFDC_USERNAME}"
+                if (rc != 0) {
+                    error 'apex test run failed'
+                }
             }
         }
 
-
-        // -------------------------------------------------------------------------
-        // Example shows how to run a check-only deploy.
-        // -------------------------------------------------------------------------
-
-        //stage('Check Only Deploy') {
-        //    rc = command "${toolbelt}/sfdx force:mdapi:deploy --checkonly --wait 10 --deploydir ${DEPLOYDIR} --targetusername UAT --testlevel ${TEST_LEVEL}"
-        //    if (rc != 0) {
-        //        error 'Salesforce deploy failed.'
-        //    }
-        //}
-    }
-}
-
-def command(script) {
-    if (isUnix()) {
-        return sh(returnStatus: true, script: script);
-    } else {
-		return bat(returnStatus: true, script: script);
+        stage('collect results') {
+            junit keepLongStdio: true, testResults: 'tests/**/*-junit.xml'
+        }
     }
 }
